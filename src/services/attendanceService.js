@@ -108,7 +108,7 @@ export const checkOut = async (userId, qrToken) => {
 
   const { total_points, total_visits, name, email } = userResult.rows[0];
 
-  if (total_points % 10 === 0) {
+  if (total_points % 5 === 0) {
     sendPointsNotificationEmail(email, name, total_points).catch((err) =>
       console.error('[Email] Gagal kirim notifikasi poin:', err.message)
     );
