@@ -116,3 +116,15 @@ export const exportUsers = async (req, res, next) => {
     res.end();
   } catch (err) { next(err); }
 };
+
+export const generateToken = async (req, res, next) => {
+  try {
+    const { type } = req.body;
+    if (!type) return sendError(res, 'Field type wajib diisi (checkin atau checkout).', 400);
+    const data = await adminService.generateAttendanceToken(type, req.user.id);
+    sendSuccess(res, `Token ${type} berhasil digenerate.`, data);
+  } catch (err) {
+    if (err.statusCode) return sendError(res, err.message, err.statusCode);
+    next(err);
+  }
+};

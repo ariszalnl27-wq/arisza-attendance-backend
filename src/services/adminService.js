@@ -217,21 +217,77 @@ export const createAdmin = async ({ name, email, phone, password }) => {
 };
 
 // ─── QR CODE ──────────────────────────────────────────────────────────────────
+// ─── HELPER: init tabel system_tokens ────────────────────────────────────────
+const ensureSystemTokensTable = async () => {
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS system_tokens (
+      key          VARCHAR(80)  PRIMARY KEY,
+      token        VARCHAR(500) NOT NULL,
+      generated_by VARCHAR(255),
+      generated_at TIMESTAMP    DEFAULT NOW()
+    )
+  `);
+};
+
+// ─── HELPER: ambil atau buat token statis QR (dibuat sekali, permanen) ────────
+const getOrCreateStaticToken = async (key) => {
+  await ensureSystemTokensTable();
+  const existing = await pool.query('SELECT token FROM system_tokens WHERE key = $1', [key]);
+  if (existing.rows[0]) return existing.rows[0].token;
+  const { nanoid } = await import('nanoid');
+  const token = nanoid(48);
+  await pool.query(
+    'INSERT INTO system_tokens (key, token, generated_by) VALUES ($1, $2, $3)',
+    [key, token, 'system']
+  );
+  return token;
+};
+
+// ─── GET QR CODES — statis + info token generated ────────────────────────────
 export const getQRCodes = async () => {
-  const checkinToken  = process.env.QR_CHECKIN_TOKEN;
-  const checkoutToken = process.env.QR_CHECKOUT_TOKEN;
-  if (!checkinToken || !checkoutToken) {
-    throw { statusCode: 500, message: 'QR token belum dikonfigurasi di environment variables.' };
-  }
+  const [checkinToken, checkoutToken] = await Promise.all([
+    getOrCreateStaticToken('checkin_qr_static'),
+    getOrCreateStaticToken('checkout_qr_static'),
+  ]);
+
   const [checkinQR, checkoutQR] = await Promise.all([
     generateQRDataURL(checkinToken),
     generateQRDataURL(checkoutToken),
   ]);
+
+  await ensureSystemTokensTable();
+  const genRows = await pool.query(
+    "SELECT key, token, generated_by, generated_at FROM system_tokens WHERE key IN ('checkin_token_generated','checkout_token_generated')"
+  );
+  const genMap = {};
+  genRows.rows.forEach((r) => { genMap[r.key] = r; });
+
   return {
     checkin:  { qr_data_url: checkinQR,  token: checkinToken },
     checkout: { qr_data_url: checkoutQR, token: checkoutToken },
-    note: 'QR ini bersifat statis. Cetak dan tempel di kasir perpustakaan.',
+    generated: {
+      checkin:  genMap['checkin_token_generated']  || null,
+      checkout: genMap['checkout_token_generated'] || null,
+    },
   };
+};
+
+// ─── GENERATE TOKEN MANUAL (bisa di-regenerasi kapan saja oleh admin) ─────────
+export const generateAttendanceToken = async (type, adminId) => {
+  if (!['checkin', 'checkout'].includes(type)) {
+    throw { statusCode: 400, message: 'Tipe tidak valid. Gunakan checkin atau checkout.' };
+  }
+  await ensureSystemTokensTable();
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  const token = Array.from({ length: 8 }, () => chars[Math.floor(Math.random() * chars.length)]).join('');
+  const key = `${type}_token_generated`;
+  await pool.query(
+    `INSERT INTO system_tokens (key, token, generated_by, generated_at)
+     VALUES ($1, $2, $3, NOW())
+     ON CONFLICT (key) DO UPDATE SET token = $2, generated_by = $3, generated_at = NOW()`,
+    [key, token, adminId]
+  );
+  return { type, token, generated_at: new Date().toISOString() };
 };
 
 // ─── EXPORT DATA USER KE EXCEL ───────────────────────────────────────────────

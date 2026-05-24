@@ -21,12 +21,24 @@ export const login = async (req, res, next) => {
   }
 };
 
-export const googleAuth = async (req, res, next) => {
+export const googleLogin = async (req, res, next) => {
   try {
     const { access_token } = req.body;
     if (!access_token) return sendError(res, 'access_token Google wajib diisi.', 400);
-    const data = await authService.googleAuth(access_token);
+    const data = await authService.googleLogin(access_token);
     sendSuccess(res, 'Login Google berhasil.', data);
+  } catch (err) {
+    if (err.statusCode) return sendError(res, err.message, err.statusCode);
+    next(err);
+  }
+};
+
+export const googleRegister = async (req, res, next) => {
+  try {
+    const { access_token } = req.body;
+    if (!access_token) return sendError(res, 'access_token Google wajib diisi.', 400);
+    const data = await authService.googleRegister(access_token);
+    sendCreated(res, 'Registrasi Google berhasil.', data);
   } catch (err) {
     if (err.statusCode) return sendError(res, err.message, err.statusCode);
     next(err);
@@ -62,7 +74,6 @@ export const forgotPassword = async (req, res, next) => {
     await authService.forgotPassword(req.body.email);
     sendSuccess(res, 'Jika email terdaftar, link reset password telah dikirim ke email Anda.');
   } catch (err) {
-    // Expose error in dev mode only
     if (process.env.NODE_ENV !== 'production' && err.message) {
       return sendError(res, `Gagal kirim email: ${err.message}`, 500);
     }

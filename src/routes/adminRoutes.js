@@ -14,6 +14,7 @@ router.use(authenticate, requireAdmin);
 
 router.get('/dashboard',            adminController.getDashboard);
 router.get('/qr',                   adminController.getQRCodes);
+router.post('/qr/generate-token',   adminController.generateToken);
 
 // Users
 router.get('/users',                adminController.getUsers);

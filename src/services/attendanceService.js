@@ -13,10 +13,30 @@ const formatDuration = (minutes) => {
   return `${h} jam ${m} menit`;
 };
 
+// ─── HELPER: validasi token (statis QR atau token generated) ─────────────────
+const isValidToken = async (inputToken, type) => {
+  // Cek token generated dari DB terlebih dahulu
+  try {
+    const key = `${type}_token_generated`;
+    const genResult = await pool.query('SELECT token FROM system_tokens WHERE key = $1', [key]);
+    if (genResult.rows[0] && genResult.rows[0].token === inputToken) return true;
+  } catch { /* tabel belum ada, lanjut */ }
+
+  // Cek token QR statis dari DB
+  try {
+    const staticKey = `${type}_qr_static`;
+    const staticResult = await pool.query('SELECT token FROM system_tokens WHERE key = $1', [staticKey]);
+    if (staticResult.rows[0] && staticResult.rows[0].token === inputToken) return true;
+  } catch { /* tabel belum ada */ }
+
+  return false;
+};
+
 // ─── CHECK IN ────────────────────────────────────────────────────────────────
 export const checkIn = async (userId, qrToken, activity) => {
-  if (qrToken !== process.env.QR_CHECKIN_TOKEN) {
-    throw { statusCode: 400, message: 'QR code check-in tidak valid.' };
+  const valid = await isValidToken(qrToken, 'checkin');
+  if (!valid) {
+    throw { statusCode: 400, message: 'Token check-in tidak valid.' };
   }
 
   const today = getTodayDateString();
@@ -46,8 +66,9 @@ export const checkIn = async (userId, qrToken, activity) => {
 
 // ─── CHECK OUT ────────────────────────────────────────────────────────────────
 export const checkOut = async (userId, qrToken) => {
-  if (qrToken !== process.env.QR_CHECKOUT_TOKEN) {
-    throw { statusCode: 400, message: 'QR code check-out tidak valid.' };
+  const valid = await isValidToken(qrToken, 'checkout');
+  if (!valid) {
+    throw { statusCode: 400, message: 'Token check-out tidak valid.' };
   }
 
   const today = getTodayDateString();
@@ -158,8 +179,8 @@ export const getPoints = async (userId) => {
   const { total_points, total_visits } = userResult.rows[0];
   const pendingRedemptions = parseInt(pendingResult.rows[0].count);
   const totalRedeemed = parseInt(redeemedResult.rows[0].total);
-  const canRedeem = total_points >= 10;
-  const pointsNeeded = canRedeem ? 0 : 10 - total_points;
+  const canRedeem = total_points >= 5;
+  const pointsNeeded = canRedeem ? 0 : 5 - total_points;
 
   return { total_points, total_visits, total_redeemed: totalRedeemed, can_redeem: canRedeem, points_needed: pointsNeeded, pending_redemptions: pendingRedemptions };
 };
@@ -172,13 +193,13 @@ export const redeemPoints = async (userId) => {
 
     const userResult = await client.query('SELECT total_points FROM users WHERE id = $1 FOR UPDATE', [userId]);
     const { total_points } = userResult.rows[0];
-    if (total_points < 10) throw { statusCode: 400, message: `Poin tidak cukup. Anda memiliki ${total_points} poin.` };
+    if (total_points < 5) throw { statusCode: 400, message: `Poin tidak cukup. Anda memiliki ${total_points} poin.` };
 
-    await client.query('UPDATE users SET total_points = total_points - 10, updated_at = NOW() WHERE id = $1', [userId]);
+    await client.query('UPDATE users SET total_points = total_points - 5, updated_at = NOW() WHERE id = $1', [userId]);
 
     const id = generateId();
     const result = await client.query(
-      `INSERT INTO point_redemptions (id, user_id, points_redeemed) VALUES ($1, $2, 10) RETURNING *`,
+      `INSERT INTO point_redemptions (id, user_id, points_redeemed) VALUES ($1, $2, 5) RETURNING *`,
       [id, userId]
     );
 

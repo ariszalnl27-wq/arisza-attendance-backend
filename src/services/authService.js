@@ -81,51 +81,39 @@ export const login = async ({ identifier, password }) => {
   return { user: safeUser(user), ...tokens };
 };
 
-// ─── GOOGLE OAUTH ─────────────────────────────────────────────────────────────
-export const googleAuth = async (accessToken) => {
-  // Ambil info user dari Google menggunakan access token
+// ─── Helper: ambil info user dari Google ─────────────────────────────────────
+const fetchGoogleUser = async (accessToken) => {
   const response = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
     headers: { Authorization: `Bearer ${accessToken}` },
   });
-
-  if (!response.ok) {
-    throw { statusCode: 401, message: 'Token Google tidak valid.' };
-  }
-
+  if (!response.ok) throw { statusCode: 401, message: 'Token Google tidak valid.' };
   const googleUser = await response.json();
-  const { sub: googleId, email, name, picture } = googleUser;
+  if (!googleUser.email) throw { statusCode: 400, message: 'Tidak dapat mengambil email dari akun Google.' };
+  return googleUser;
+};
 
-  if (!email) throw { statusCode: 400, message: 'Tidak dapat mengambil email dari akun Google.' };
+// ─── GOOGLE LOGIN (hanya untuk akun yang sudah terdaftar) ────────────────────
+export const googleLogin = async (accessToken) => {
+  const { sub: googleId, email, picture } = await fetchGoogleUser(accessToken);
 
-  // Cari user berdasarkan google_id
+  // Cari user berdasarkan google_id atau email
   let userResult = await pool.query('SELECT * FROM users WHERE google_id = $1', [googleId]);
-  let isNewUser = false;
 
   if (!userResult.rows[0]) {
-    // Cek apakah email sudah terdaftar manual
+    // Cek apakah email sudah terdaftar (akun email/password yang di-link)
     const emailResult = await pool.query('SELECT * FROM users WHERE email = $1', [email]);
-
     if (emailResult.rows[0]) {
       const existing = emailResult.rows[0];
-      if (!existing.is_active) {
-        throw { statusCode: 401, message: 'Akun Anda telah dinonaktifkan.' };
-      }
+      if (!existing.is_active) throw { statusCode: 401, message: 'Akun Anda telah dinonaktifkan.' };
       // Link google_id ke akun yang sudah ada
       await pool.query(
-        'UPDATE users SET google_id = $1, photo_url = COALESCE(photo_url, $2), auth_provider = $3, updated_at = NOW() WHERE id = $4',
-        [googleId, picture, existing.auth_provider === 'email' ? 'email' : 'google', existing.id]
+        'UPDATE users SET google_id = $1, photo_url = COALESCE(photo_url, $2), updated_at = NOW() WHERE id = $3',
+        [googleId, picture, existing.id]
       );
       userResult = await pool.query('SELECT * FROM users WHERE id = $1', [existing.id]);
     } else {
-      // Buat user baru dari Google — tandai sebagai pengguna baru
-      isNewUser = true;
-      const id = generateId();
-      await pool.query(
-        `INSERT INTO users (id, name, email, google_id, photo_url, auth_provider)
-         VALUES ($1, $2, $3, $4, $5, 'google')`,
-        [id, name, email, googleId, picture]
-      );
-      userResult = await pool.query('SELECT * FROM users WHERE id = $1', [id]);
+      // Akun belum terdaftar — arahkan ke register
+      throw { statusCode: 404, message: 'Akun belum terdaftar. Silakan daftar terlebih dahulu.' };
     }
   }
 
@@ -139,7 +127,41 @@ export const googleAuth = async (accessToken) => {
   }
 
   const tokens = await createTokenPair(user);
-  return { user: safeUser(user), ...tokens, isNewUser };
+  return { user: safeUser(user), ...tokens };
+};
+
+// ─── GOOGLE REGISTER (hanya untuk akun baru) ─────────────────────────────────
+export const googleRegister = async (accessToken) => {
+  const { sub: googleId, email, name, picture } = await fetchGoogleUser(accessToken);
+
+  // Cek apakah sudah terdaftar via google_id
+  const byGoogleId = await pool.query('SELECT * FROM users WHERE google_id = $1', [googleId]);
+  if (byGoogleId.rows[0]) {
+    throw { statusCode: 409, message: 'Akun Google ini sudah terdaftar. Silakan login.' };
+  }
+
+  // Cek apakah email sudah terdaftar
+  const byEmail = await pool.query('SELECT * FROM users WHERE email = $1', [email]);
+  if (byEmail.rows[0]) {
+    const existing = byEmail.rows[0];
+    if (existing.auth_provider === 'google') {
+      throw { statusCode: 409, message: 'Akun Google ini sudah terdaftar. Silakan login.' };
+    }
+    throw { statusCode: 409, message: 'Email ini sudah terdaftar. Silakan login dengan password.' };
+  }
+
+  // Buat user baru dari Google
+  const id = generateId();
+  await pool.query(
+    `INSERT INTO users (id, name, email, google_id, photo_url, auth_provider)
+     VALUES ($1, $2, $3, $4, $5, 'google')`,
+    [id, name, email, googleId, picture]
+  );
+  const userResult = await pool.query('SELECT * FROM users WHERE id = $1', [id]);
+  const user = userResult.rows[0];
+
+  const tokens = await createTokenPair(user);
+  return { user: safeUser(user), ...tokens, isNewUser: true };
 };
 
 // ─── REFRESH TOKEN ────────────────────────────────────────────────────────────
