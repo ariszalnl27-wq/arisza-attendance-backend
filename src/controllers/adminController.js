@@ -8,10 +8,11 @@ export const getDashboard = async (req, res, next) => {
 
 export const getUsers = async (req, res, next) => {
   try {
-    const page   = parseInt(req.query.page)  || 1;
-    const limit  = parseInt(req.query.limit) || 10;
-    const search = req.query.search || '';
-    sendSuccess(res, 'Daftar pengguna.', await adminService.getUsers(page, limit, search));
+    const page         = parseInt(req.query.page)  || 1;
+    const limit        = parseInt(req.query.limit) || 10;
+    const search       = req.query.search || '';
+    const minThreshold = req.query.min_threshold === 'true';
+    sendSuccess(res, 'Daftar pengguna.', await adminService.getUsers(page, limit, search, minThreshold));
   } catch (err) { next(err); }
 };
 
@@ -108,7 +109,8 @@ export const getQRCodes = async (req, res, next) => {
 
 export const exportUsers = async (req, res, next) => {
   try {
-    const workbook = await adminService.exportUsersExcel();
+    const minThreshold = req.query.min_threshold === 'true';
+    const workbook = await adminService.exportUsersExcel(minThreshold);
     const filename = `data-pengunjung-${new Date().toISOString().split('T')[0]}.xlsx`;
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
     res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);

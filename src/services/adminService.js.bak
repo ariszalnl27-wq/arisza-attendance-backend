@@ -26,27 +26,19 @@ export const getDashboard = async () => {
 };
 
 // ─── KELOLA USER ──────────────────────────────────────────────────────────────
-export const getUsers = async (page = 1, limit = 10, search = '', minThreshold = false) => {
+export const getUsers = async (page = 1, limit = 10, search = '') => {
   const offset = (page - 1) * limit;
   const searchParam = `%${search}%`;
-
-  // minThreshold: filter pengguna dengan poin >= 5 DAN kunjungan >= 5
-  const thresholdClause = minThreshold
-    ? 'AND total_points >= 5 AND total_visits >= 5'
-    : '';
-
   const [rowsResult, countResult] = await Promise.all([
     pool.query(
       `SELECT id, name, email, phone, institution, photo_url, role, auth_provider,
               total_points, total_visits, is_active, created_at
-       FROM users WHERE (name ILIKE $1 OR email ILIKE $1 OR (phone IS NOT NULL AND phone ILIKE $1))
-       ${thresholdClause}
+       FROM users WHERE (name ILIKE $1 OR email ILIKE $1 OR phone ILIKE $1)
        ORDER BY created_at DESC LIMIT $2 OFFSET $3`,
       [searchParam, limit, offset]
     ),
     pool.query(
-      `SELECT COUNT(*) FROM users WHERE (name ILIKE $1 OR email ILIKE $1 OR (phone IS NOT NULL AND phone ILIKE $1))
-       ${thresholdClause}`,
+      'SELECT COUNT(*) FROM users WHERE (name ILIKE $1 OR email ILIKE $1 OR phone ILIKE $1)',
       [searchParam]
     ),
   ]);
@@ -299,18 +291,14 @@ export const generateAttendanceToken = async (type, adminId) => {
 };
 
 // ─── EXPORT DATA USER KE EXCEL ───────────────────────────────────────────────
-export const exportUsersExcel = async (minThreshold = false) => {
-  const thresholdClause = minThreshold
-    ? 'AND u.total_points >= 5 AND u.total_visits >= 5'
-    : '';
-
+export const exportUsersExcel = async () => {
   const result = await pool.query(
     `SELECT u.id, u.name, u.institution, u.email, u.phone,
             u.total_visits, u.total_points,
             COALESCE(SUM(pr.points_redeemed) FILTER (WHERE pr.status = 'approved'), 0) AS total_points_redeemed
      FROM users u
      LEFT JOIN point_redemptions pr ON pr.user_id = u.id
-     WHERE u.role = 'user' ${thresholdClause}
+     WHERE u.role = 'user'
      GROUP BY u.id
      ORDER BY u.name ASC`
   );
